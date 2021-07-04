@@ -109,6 +109,7 @@ struct ngx_open_file_s {
 #define NGX_MODULE_V1_PADDING  0, 0, 0, 0, 0, 0, 0, 0
 
 struct ngx_module_s {
+    //ctx_index 表明了模块在相同类型模块中的顺序
     ngx_uint_t            ctx_index;
     ngx_uint_t            index;
 

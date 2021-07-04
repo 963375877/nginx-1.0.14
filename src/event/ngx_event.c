@@ -116,8 +116,10 @@ ngx_module_t  ngx_events_module = {
 static ngx_str_t  event_core_name = ngx_string("event_core");
 
 
-static ngx_command_t  ngx_event_core_commands[] = {
 
+static ngx_command_t  ngx_event_core_commands[] = {
+    /*连接池的大小，也就是每个worker进程中支持的TCP最大连接数，
+    它与下面的 connections 配置项的意义是重复的*/
     { ngx_string("worker_connections"),
       NGX_EVENT_CONF|NGX_CONF_TAKE1,
       ngx_event_connections,
@@ -125,6 +127,7 @@ static ngx_command_t  ngx_event_core_commands[] = {
       0,
       NULL },
 
+    // 连接池的大小，与worker connections 配置项意义相同
     { ngx_string("connections"),
       NGX_EVENT_CONF|NGX_CONF_TAKE1,
       ngx_event_connections,
@@ -132,6 +135,7 @@ static ngx_command_t  ngx_event_core_commands[] = {
       0,
       NULL },
 
+    //确定选择哪一个事件模块作为事件驱动机制
     { ngx_string("use"),
       NGX_EVENT_CONF|NGX_CONF_TAKE1,
       ngx_event_use,
@@ -139,6 +143,8 @@ static ngx_command_t  ngx_event_core_commands[] = {
       0,
       NULL },
 
+    /*事件定义的 available 字段。对于epoll事件驱动模式来说，
+    意味着在接收到一个新连接事件时，调用 accept 以尽可能多地接收连接*/
     { ngx_string("multi_accept"),
       NGX_EVENT_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
@@ -146,6 +152,7 @@ static ngx_command_t  ngx_event_core_commands[] = {
       offsetof(ngx_event_conf_t, multi_accept),
       NULL },
 
+    // 确定是否使用 accept mutex负载均衡锁，默认为开启
     { ngx_string("accept_mutex"),
       NGX_EVENT_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
@@ -153,6 +160,7 @@ static ngx_command_t  ngx_event_core_commands[] = {
       offsetof(ngx_event_conf_t, accept_mutex),
       NULL },
 
+    /*启用 accept_mutex负载均衡锁后，延迟 accept_mutex_delay毫秒后再试图处理新连接事件*/
     { ngx_string("accept_mutex_delay"),
       NGX_EVENT_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_msec_slot,
@@ -160,6 +168,7 @@ static ngx_command_t  ngx_event_core_commands[] = {
       offsetof(ngx_event_conf_t, accept_mutex_delay),
       NULL },
 
+    //需要对来自指定 IP的 TCP连接打印 debug 级别的调试日志
     { ngx_string("debug_connection"),
       NGX_EVENT_CONF|NGX_CONF_TAKE1,
       ngx_event_debug_connection,
@@ -179,7 +188,11 @@ ngx_event_module_t  ngx_event_core_module_ctx = {
     { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 };
 
-
+/*
+ngx_event_core_module 模块是一个事件类型的模块，
+它在所有事件模块中的顺序是第一位（configure 执行时必须把它放在其他事件模块之前）。
+这就保证了它会先于其他事件模块执行，由此它选择事件驱动机制的任务才可以完成。
+*/
 ngx_module_t  ngx_event_core_module = {
     NGX_MODULE_V1,
     &ngx_event_core_module_ctx,            /* module context */
@@ -275,7 +288,14 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
     }
 }
 
-
+/*ngx_handle_read_event 方法会将读事件添加到事件驱动模块中，
+这样该事件对应的 TCP连接上一旦出现可读事件（如接收到 TCP 连接另一端发送来的字符流）
+就会回调该事件的 handler 方法。下面看一下 ngx handle_read event的参数和返回值。
+参数 rev 是要操作的事件，flags将会指定事件的驱动方式。对于不同的事件驱动模块，
+flags 的取值范围并不同，本书以 Linux 下的 epoll为例，对于ngx_epoll_module 来说，
+flags的取值范围可以是0或者 NGX CLOSE EVENT（NGX_CLOSE EVENT 仅在 epoll 的 LT水平触发模式下有效），
+Nginx 主要工作在 ET模式下，一般可以忽略 flags 这个参数。该方法返回 NGX_OK 表示成功，返回 NGX_ERROR 表示失败。
+*/
 ngx_int_t
 ngx_handle_read_event(ngx_event_t *rev, ngx_uint_t flags)
 {
@@ -343,7 +363,24 @@ ngx_handle_read_event(ngx_event_t *rev, ngx_uint_t flags)
     return NGX_OK;
 }
 
+/*
+一般在向 epoll 中添加可读或者可写事件时，都是使用 ngx_handle_read_event 或者 ngx_ handle write event 方法的。
+对于事件驱动模块实现的 ngx event actions 结构体中的事件设置方法，最好不要直接调用，
+下面这 4个方法直接使用时都会与具体的事件驱动机，制强相关，
+而使用 ngx_handle read event 或者 ngx handle write event 方法则可以屏蔽这种差异。
+#define ngx_add_event   ngx_event_actions.add
+#define ngx_del_event   ngx_event_actions.del
+#define ngx_add_conn    ngx_event_actions.add_conn
+#define ngx_del_conn    ngx_event_actions.del_conn
+*/
 
+
+
+/*ngx_handle_write event 方法会将写事件添加到事件驱动模块中。
+wev 是要操作的事件，而lowat则表示只有当连接对应的套接字缓冲区中必须有 lowat 大小的可用空间时，
+事件收集器（如 select 或者 epoll wait 调用）才能处理这个可写事件（lowat 参数为 0时表示不考虑可写缓冲区的大小）。
+该方法返回 NGX OK 表示成功，返回 NGX ERROR 表示失败。
+*/
 ngx_int_t
 ngx_handle_write_event(ngx_event_t *wev, size_t lowat)
 {

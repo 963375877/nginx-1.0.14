@@ -360,6 +360,7 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
     ngx_event_actions = ngx_epoll_module_ctx.actions;
 
 #if (NGX_HAVE_CLEAR_EVENT)
+    /*默认是采用 ET模式来使用epoll的，NGX_USE_CLEAR_EVENT 宏实际上就是在告诉Nginx使用 ET模式*/
     ngx_event_flags = NGX_USE_CLEAR_EVENT
 #else
     ngx_event_flags = NGX_USE_LEVEL_EVENT

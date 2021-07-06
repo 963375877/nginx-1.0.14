@@ -612,7 +612,7 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     err = (events == -1) ? ngx_errno : 0;
 
     /*当flags标志位指示要更新时间时，就是在这里更新的*/
-    if (flags & NGX_UPDATE_TIM || ngx_event_timer_alarm) {
+    if (flags & NGX_UPDATE_TIME || ngx_event_timer_alarm) {
         ngx_time_update();
     }
 

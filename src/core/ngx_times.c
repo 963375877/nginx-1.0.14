@@ -23,11 +23,22 @@
 static ngx_uint_t        slot;
 static ngx_atomic_t      ngx_time_lock;
 
+//格林威治时间1970年1 月1日凌晨0点0 分0秒到当前时间的毫秒数
 volatile ngx_msec_t      ngx_current_msec;
+
+//ngx_time_t 结构体形式的当前时间
 volatile ngx_time_t     *ngx_cached_time;
+
+/*用于记录error_log的当前时间字符串，它的格式类似于∶"1970/09/28 12∶00∶00"*/
 volatile ngx_str_t       ngx_cached_err_log_time;
+
+/*用于HTTP相关的当前时间字符串，它的格式类似于∶"Mon，28 Sep 1970 06∶00∶00 GMT"*/
 volatile ngx_str_t       ngx_cached_http_time;
+
+/*用于记录 HTTP日志的当前时间字特串，它的格式类似于;"28/Sep/1970∶12∶00∶00 +0600"*/
 volatile ngx_str_t       ngx_cached_http_log_time;
+
+// 以ISO 8601标准格式记录下的字符串形式的当前时间
 volatile ngx_str_t       ngx_cached_http_log_iso8601;
 
 #if !(NGX_WIN32)

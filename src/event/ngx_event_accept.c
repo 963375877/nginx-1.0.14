@@ -294,23 +294,34 @@ ngx_event_accept(ngx_event_t *ev)
 ngx_int_t
 ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
 {
+    /*使用进程间的同步锁，试图获取accept_mutex 锁。注意，ngx_shmtx_trylock 返回1表示成功拿到锁，
+    返回0 表示获取锁失败。这个获取锁的过程是非阻塞的，此时一旦锁被其他 worker 子进程占用，
+    ngx_shmtx_trylock 方法会立刻返回 */
     if (ngx_shmtx_trylock(&ngx_accept_mutex)) {
 
         ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                        "accept mutex locked");
-
+        
+        /*如果获取到 accept_mutex锁，但ngx_accept_mutex_held为1，则立刻返回。
+        ngx_accept mutex held是一个标志位，当它为 1时，表示当前进程已经获取到锁了*/
         if (ngx_accept_mutex_held
             && ngx_accept_events == 0
             && !(ngx_event_flags & NGX_USE_RTSIG_EVENT))
         {
+            //ngx_accept_mutex锁之前已经获取到了，立刻返回
             return NGX_OK;
         }
 
+        //将所有监听连接的读事件添加到当前的epoll等事件驱动模块中
         if (ngx_enable_accept_events(cycle) == NGX_ERROR) {
+
+            /* 既然将监听句柄添加到事件驱动模块失败，就必须释放ngx_accept_mutex 锁*/
             ngx_shmtx_unlock(&ngx_accept_mutex);
             return NGX_ERROR;
         }
 
+        /*经过ngx_enable_accept_events方法的调用，当前进程的事件驱动模块已经开始监听所有的端口，
+        这时需要把ngx_accept_mutex_held标志位置为1，方便本进程的其他模块了解它目前已经获取到了锁*/
         ngx_accept_events = 0;
         ngx_accept_mutex_held = 1;
 
@@ -320,11 +331,14 @@ ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "accept mutex lock failed: %ui", ngx_accept_mutex_held);
 
+    /*如果ngx_shmtx_trylock 返回 0，则 表明获取 ngx_accept_mutex锁失败，
+    这时如果ngx_accept_mutex_held标志位还为1，即当前进程还在获取到销的状态，
+    这当然是不正确的，需要处理*/
     if (ngx_accept_mutex_held) {
         if (ngx_disable_accept_events(cycle) == NGX_ERROR) {
             return NGX_ERROR;
         }
-
+        /*在没有获取到ngx_accept_mutex锁时，必须把ngx_accept_mutex_held置为0*/
         ngx_accept_mutex_held = 0;
     }
 

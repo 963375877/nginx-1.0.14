@@ -56,7 +56,7 @@ struct ngx_event_s {
 
     /* 标志位，为 1 时表示当前事件是活跃的，为0时表示事件是不活跃的。
     这个状态对应着事件驱动模块处理方式的不同。例如，在添加事件、删除事件和处理事件时，
-    actiye 标志位的不同都会对应着不同的处理方式。在使用事件时，一般不会直接改变 active 标志位*/
+    active 标志位的不同都会对应着不同的处理方式。在使用事件时，一般不会直接改变 active 标志位*/
     /*
      * the event was passed or would be passed to a kernel;
      * in aio mode - operation was posted.

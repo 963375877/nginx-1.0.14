@@ -700,7 +700,7 @@ ngx_close_listening_sockets(ngx_cycle_t *cycle)
     }
 }
 
-
+//当调用ngx_get_connection 从连接池中获取一个新连接时，instance 标志位就会置反，代码如下所示。
 ngx_connection_t *
 ngx_get_connection(ngx_socket_t s, ngx_log_t *log)
 {
@@ -724,6 +724,7 @@ ngx_get_connection(ngx_socket_t s, ngx_log_t *log)
 
     if (c == NULL) {
         ngx_drain_connections();
+        //从连接池中获取一个连接
         c = ngx_cycle->free_connections;
     }
 
@@ -761,6 +762,7 @@ ngx_get_connection(ngx_socket_t s, ngx_log_t *log)
     ngx_memzero(rev, sizeof(ngx_event_t));
     ngx_memzero(wev, sizeof(ngx_event_t));
 
+    //将instance 标志位置为原来的相反值
     rev->instance = !instance;
     wev->instance = !instance;
 

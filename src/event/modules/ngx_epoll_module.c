@@ -69,9 +69,16 @@ int epoll_wait(int epfd, struct epoll_event *events, int nevents, int timeout)
 typedef u_int  aio_context_t;
 
 struct io_event {
+    // 与提交事件时对应的iocb结构体中的aio_data是一致的
     uint64_t  data;  /* the data field from the iocb */
+
+    //指向提交事件时对应的iocb结构体
     uint64_t  obj;   /* what iocb this event came from */
+
+    // 异步I/O请求的结构。res 大于或等于0时表示成功，小于0时表示失败
     int64_t   res;   /* result code for this event */
+
+    //保留字段
     int64_t   res2;  /* secondary result */
 };
 
@@ -116,10 +123,16 @@ static ngx_uint_t           nevents;
 
 #if (NGX_HAVE_FILE_AIO)
 
+//用于通知异步 I/O 事件的描述符，它与iocb 结构体中的 aio_resfd成员是一致的
 int                         ngx_eventfd = -1;
+
+//异步I/O的上下文，全局唯一，必须经过io_setup初始化才能使用
 aio_context_t               ngx_aio_ctx = 0;
 
+/* 异步 I/O 事件完成后进行通知的描述符，也就是ngx_eventfd所对应的ngx_event_t事件*/
 static ngx_event_t          ngx_eventfd_event;
+
+/*异步 I/O 事件完成后进行通知的描述符 ngx_eventfd 所对应的ngx_connection_t连接*/
 static ngx_connection_t     ngx_eventfd_conn;
 
 #endif
@@ -244,6 +257,7 @@ ngx_epoll_aio_init(ngx_cycle_t *cycle, ngx_epoll_conf_t *epcf)
     int                 n;
     struct epoll_event  ee;
 
+    // 使用Linux 中第 323 个系统调用获取一个描述符向柄
     ngx_eventfd = syscall(SYS_eventfd, 0);
 
     if (ngx_eventfd == -1) {
@@ -257,30 +271,40 @@ ngx_epoll_aio_init(ngx_cycle_t *cycle, ngx_epoll_conf_t *epcf)
                    "eventfd: %d", ngx_eventfd);
 
     n = 1;
-
+    // 设置ngx_eventfd为无阻塞
     if (ioctl(ngx_eventfd, FIONBIO, &n) == -1) {
         ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                       "ioctl(eventfd, FIONBIO) failed");
         goto failed;
     }
 
+    //初始化文件异步I/o的上下文
     if (io_setup(epcf->aio_requests, &ngx_aio_ctx) == -1) {
         ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                       "io_setup() failed");
         goto failed;
     }
 
+    /* 设置用于异步 I/O完成通知的ngpx_eventfd_event事件，它与 ngx_eventfd_conn连接是对应的*/
     ngx_eventfd_event.data = &ngx_eventfd_conn;
+
+    //在异步I/o事件完成后，使用ngx_epoll_eventfd_handler方法处理
     ngx_eventfd_event.handler = ngx_epoll_eventfd_handler;
     ngx_eventfd_event.log = cycle->log;
     ngx_eventfd_event.active = 1;
+
+    //初始化ngx_eventfd_conn 连接
     ngx_eventfd_conn.fd = ngx_eventfd;
+
+    //ngx_eventfd_conn连接的读事件就是上面的ngx_eventfd_event
     ngx_eventfd_conn.read = &ngx_eventfd_event;
+
     ngx_eventfd_conn.log = cycle->log;
 
     ee.events = EPOLLIN|EPOLLET;
     ee.data.ptr = &ngx_eventfd_conn;
 
+    //向epoll中添加到异步I/O的通知描述符ngx_eventfd
     if (epoll_ctl(ep, EPOLL_CTL_ADD, ngx_eventfd, &ee) != -1) {
         return;
     }
@@ -790,15 +814,18 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
     ngx_err_t         err;
     ngx_event_t      *e;
     ngx_event_aio_t  *aio;
+
+    //一次性最多处理 64 个事件
     struct io_event   event[64];
     struct timespec   ts;
 
     ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "eventfd handler");
 
+    /*获取已经完成的事件数目，并设置到ready中，注意，这个ready是可以大于64的*/
     n = read(ngx_eventfd, &ready, 8);
 
     err = ngx_errno;
-
+    
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, ev->log, 0, "eventfd: %d", n);
 
     if (n != 8) {
@@ -819,16 +846,21 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
 
+    //ready 表示还未处理的事件。当ready 大于0时继续处理
     while (ready) {
 
+        //调用io_getevents获取已经完成的异步I/O事件
         events = io_getevents(ngx_aio_ctx, 1, 64, event, &ts);
 
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, ev->log, 0,
                        "io_getevents: %l", events);
-
+                    
+        
         if (events > 0) {
+            //将ready减去已经取出的事件
             ready -= events;
 
+            //处理event数组里的事件
             for (i = 0; i < events; i++) {
 
                 ngx_log_debug4(NGX_LOG_DEBUG_EVENT, ev->log, 0,
@@ -836,6 +868,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
                                 event[i].data, event[i].obj,
                                 event[i].res, event[i].res2);
 
+                //data 成员指向这个异步I/O 事件对应着的实际事件
                 e = (ngx_event_t *) (uintptr_t) event[i].data;
 
                 e->complete = 1;
@@ -845,6 +878,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
                 aio = e->data;
                 aio->res = event[i].res;
 
+                //将该事件放到ngx_posted_events队列中延后执行
                 ngx_post_event(e, &ngx_posted_events);
             }
 

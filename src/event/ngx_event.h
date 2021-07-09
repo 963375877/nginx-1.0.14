@@ -235,6 +235,7 @@ struct ngx_event_s {
 
 struct ngx_event_aio_s {
     void                      *data;
+    // 这是真正由业务模块实现的方法，在异步 I/O 事件完成后被调用
     ngx_event_handler_pt       handler;
     ngx_file_t                *file;
 
